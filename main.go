@@ -18,7 +18,8 @@ var (
 	// broadcast channel for sending messages to all clients
 	broadcast = make(chan string)
 	// mutex for synchronizing access to shared data
-	mutex = &sync.Mutex{}
+	mutex             = &sync.Mutex{}
+	lastPrivateSender = make(map[string]string) // maps recipient username to last sender username
 )
 
 // main starts the chat server
@@ -68,7 +69,7 @@ func handleClient(conn net.Conn) {
 	mutex.Unlock()
 
 	// Notify everyone that a new client has joined
-	broadcast <- fmt.Sprintf("%s has joined the chat\n", name)
+	broadcast <- fmt.Sprintf("\033[33m%s has joined the chat\033[0m\n", name)
 
 	// Handle client messages
 	for {
@@ -79,14 +80,13 @@ func handleClient(conn net.Conn) {
 		}
 		message = strings.TrimSpace(message)
 
-		// Check if it's a private message
-		if strings.HasPrefix(message, "/private") {
-			handlePrivateMessage(conn, message)
+		// Handle any commands, continue if a command was processed
+		if handleCommand(conn, message) {
 			continue
 		}
 
 		// Broadcast the message to all clients
-		broadcast <- fmt.Sprintf("%s: %s\n", name, message)
+		broadcast <- fmt.Sprintf("\033[34m%s: %s\033[0m\n", name, message)
 	}
 
 	// Clean up when client disconnects
@@ -94,8 +94,57 @@ func handleClient(conn net.Conn) {
 	delete(clients, conn)
 	delete(nameToConn, name)
 	mutex.Unlock()
-	broadcast <- fmt.Sprintf("%s has left the chat\n", name)
+	broadcast <- fmt.Sprintf("\033[33m%s has left the chat\033[0m\n", name)
 	conn.Close()
+}
+
+// handleCommand handles any commands from the client
+func handleCommand(conn net.Conn, message string) bool {
+	// /users command
+	if strings.HasPrefix(message, "/users") {
+		handleUsersCommand(conn)
+		return true
+	}
+	// /private command
+	if strings.HasPrefix(message, "/private") {
+		handlePrivateMessage(conn, message)
+		return true
+	}
+
+	// /reply command
+	if strings.HasPrefix(message, "/reply") {
+		handleReplyCommand(conn, message)
+		return true
+	}
+	return false
+}
+
+// handleReplyCommand allows replying to the last private sender
+func handleReplyCommand(conn net.Conn, message string) {
+	mutex.Lock()
+	username := clients[conn]
+	lastSender, ok := lastPrivateSender[username]
+	mutex.Unlock()
+	if !ok {
+		conn.Write([]byte("No private messages to reply to.\n"))
+		return
+	}
+	parts := strings.SplitN(message, " ", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+		conn.Write([]byte("Usage: /reply <message>\n"))
+		return
+	}
+	msg := parts[1]
+	handlePrivateMessage(conn, fmt.Sprintf("/private %s %s", lastSender, msg))
+}
+
+// handleUsersCommand handles the /users command
+func handleUsersCommand(conn net.Conn) {
+	mutex.Lock()
+	for _, name := range clients {
+		conn.Write([]byte("\033[90m" + name + "\033[0m\n"))
+	}
+	mutex.Unlock()
 }
 
 // handleBroadcasting sends messages to all connected clients

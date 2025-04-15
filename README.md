@@ -6,6 +6,9 @@ A high-performance, real-time chat server built with Go (Golang) that enables se
 
 - Real-time message broadcasting
 - Private messaging between users
+- Reply to the last private message sender with `/reply <message>`
+- List all connected users with `/users` (displayed in grey)
+- Colored messages: blue for chat/private, yellow for join/leave notifications
 - TCP-based communication
 - Concurrent client handling
 - Simple and efficient architecture
@@ -59,7 +62,16 @@ telnet localhost 8080
   ```
   /private <username> <message>
   ```
-- Regular messages are broadcast to all connected users
+- To reply to the last private message sender:
+  ```
+  /reply <message>
+  ```
+- To list all connected users (displayed in grey):
+  ```
+  /users
+  ```
+- Regular messages are broadcast to all connected users (displayed in blue)
+- Join/leave notifications are displayed in yellow
 
 ### Additional Make Commands
 

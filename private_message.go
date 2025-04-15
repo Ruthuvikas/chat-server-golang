@@ -53,8 +53,12 @@ func processPrivateMessages() {
 		mutex.Unlock()
 
 		if ok {
+			// Record the last private sender for the recipient
+			mutex.Lock()
+			lastPrivateSender[msg.recipient] = msg.sender
+			mutex.Unlock()
 			// Send the message to the recipient
-			conn.Write([]byte(fmt.Sprintf("[Private from %s] %s\n", msg.sender, msg.message)))
+			conn.Write([]byte(fmt.Sprintf("\033[34m[Private from %s] %s\033[0m\n", msg.sender, msg.message)))
 		} else {
 			// Notify sender if recipient is not found
 			senderConn.Write([]byte(fmt.Sprintf("User %s not found\n", msg.recipient)))
