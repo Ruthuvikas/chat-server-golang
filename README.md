@@ -1,11 +1,12 @@
 # Real-time Chat Server in Go
 
-A high-performance, real-time chat server built with Go (Golang) that enables seamless communication between multiple clients.
+A high-performance, real-time chat server built with Go (Golang) that enables seamless communication between multiple clients using TCP protocol.
 
 ## Features
 
 - Real-time message broadcasting
-- WebSocket-based communication
+- Private messaging between users
+- TCP-based communication
 - Concurrent client handling
 - Simple and efficient architecture
 - Easy to deploy and scale
@@ -13,7 +14,8 @@ A high-performance, real-time chat server built with Go (Golang) that enables se
 ## Prerequisites
 
 - Go 1.16 or higher
-- Basic understanding of WebSocket protocol
+- Basic understanding of TCP protocol
+- Make (for using Makefile commands)
 
 ## Installation
 
@@ -25,21 +27,48 @@ cd chat-server-golang
 
 2. Install dependencies:
 ```bash
-go mod download
+make deps
 ```
 
-3. Run the server:
+3. Build the server:
 ```bash
-go run main.go
+make build
+```
+
+4. Run the server:
+```bash
+make run
+```
+
+Alternatively, you can run the server directly:
+```bash
+go run main.go private_message.go
 ```
 
 ## Usage
 
-The chat server runs on port `8080` by default. Connect to it using any WebSocket client:
+The chat server runs on port `8080` by default. Connect to it using any TCP client:
 
 ```
-ws://localhost:8080/ws
+telnet localhost 8080
 ```
+
+### Commands
+
+- To send a private message:
+  ```
+  /private <username> <message>
+  ```
+- Regular messages are broadcast to all connected users
+
+### Additional Make Commands
+
+- `make build` - Build the chat server binary
+- `make run` - Run the chat server
+- `make clean` - Remove build artifacts
+- `make test` - Run tests
+- `make deps` - Install dependencies
+- `make help` - Show all available commands
 
 ## Tutorial
 
