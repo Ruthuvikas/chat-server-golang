@@ -8,7 +8,8 @@ A high-performance, real-time chat server built with Go (Golang) that enables se
 - Private messaging between users
 - User registration and authentication
 - Reply to the last private message sender with `/reply <message>`
-- List all connected users with `/users`
+- List all connected users with `/users` (including their status)
+- Set your status with `/status`
 - Exit chat gracefully with `/exit`
 - Get help with all commands using `/help`
 - Color-coded messages for better readability
@@ -80,6 +81,10 @@ telnet localhost 8080
 - To list all connected users:
   ```
   /users
+  ```
+- To set your status:
+  ```
+  /status <your status message>
   ```
 - To exit the chat server:
   ```

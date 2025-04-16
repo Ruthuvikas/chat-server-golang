@@ -23,6 +23,9 @@ var (
 	nameToPass = make(map[string]string)
 	// broadcast channel for sending messages to all clients
 	broadcast = make(chan string)
+
+	//status map for storing the status of the clients
+	status = make(map[string]string)
 	// mutex for synchronizing access to shared data
 	mutex             = &sync.Mutex{}
 	lastPrivateSender = make(map[string]string) // maps recipient username to last sender username
@@ -227,7 +230,27 @@ func handleCommand(conn net.Conn, message string) bool {
 		handleHelpCommand(conn)
 		return true
 	}
+	// /status command
+	if strings.HasPrefix(message, "/status") {
+		handleStatusCommand(conn, message)
+		return true
+	}
 	return false
+}
+
+// handleStatusCommand handles the /status command
+func handleStatusCommand(conn net.Conn, message string) {
+	parts := strings.SplitN(message, " ", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+		conn.Write([]byte("\033[1;31mUsage: /status <set status>\033[0m\n"))
+		return
+	}
+	newStatus := parts[1]
+	mutex.Lock()
+	username := clients[conn]
+	status[username] = newStatus
+	mutex.Unlock()
+	conn.Write([]byte(fmt.Sprintf("\033[1;32mYour status has been set to: %s\033[0m\n", newStatus)))
 }
 
 // handleReplyCommand allows replying to the last private sender
@@ -253,7 +276,13 @@ func handleReplyCommand(conn net.Conn, message string) {
 func handleUsersCommand(conn net.Conn) {
 	mutex.Lock()
 	for _, name := range clients {
-		conn.Write([]byte("\033[90m" + name + "\033[0m\n"))
+		//display name and status
+		status, ok := status[name]
+		if ok {
+			conn.Write([]byte(fmt.Sprintf("\033[90m%s (%s)\033[0m\n", name, status)))
+		} else {
+			conn.Write([]byte("\033[90m" + name + "\033[0m\n"))
+		}
 	}
 	mutex.Unlock()
 }
