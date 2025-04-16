@@ -212,10 +212,19 @@ func handleCommand(conn net.Conn, message string) bool {
 		handlePrivateMessage(conn, message)
 		return true
 	}
-
 	// /reply command
 	if strings.HasPrefix(message, "/reply") {
 		handleReplyCommand(conn, message)
+		return true
+	}
+	// /exit command
+	if strings.HasPrefix(message, "/exit") {
+		handleExitCommand(conn)
+		return true
+	}
+	// /help command
+	if strings.HasPrefix(message, "/help") {
+		handleHelpCommand(conn)
 		return true
 	}
 	return false
@@ -287,4 +296,45 @@ func handleLoginCommand(conn net.Conn, message string) string {
 
 	conn.Write([]byte(fmt.Sprintf("\033[1;32mWelcome back, %s!\033[0m\n", username)))
 	return username
+}
+
+// handleExitCommand handles the /exit command
+func handleExitCommand(conn net.Conn) {
+	mutex.Lock()
+	name := clients[conn]
+	delete(clients, conn)
+	delete(nameToConn, name)
+	mutex.Unlock()
+
+	// Notify everyone that the user has left
+	broadcast <- fmt.Sprintf("\033[33m%s has left the chat\033[0m\n", name)
+
+	// Send goodbye message to the exiting user
+	conn.Write([]byte("\033[1;32mGoodbye! Thanks for chatting.\033[0m\n"))
+
+	// Close the connection
+	conn.Close()
+}
+
+// handleHelpCommand displays all available commands and their descriptions
+func handleHelpCommand(conn net.Conn) {
+	helpMessage := "\033[1;36mAvailable Commands:\033[0m\n\n" +
+		"\033[1;33m/register <username> <password>\033[0m\n" +
+		"    Register a new user account\n\n" +
+		"\033[1;33m/login <username> <password>\033[0m\n" +
+		"    Login to your account\n\n" +
+		"\033[1;33m/users\033[0m\n" +
+		"    List all currently connected users\n\n" +
+		"\033[1;33m/private <username> <message>\033[0m\n" +
+		"    Send a private message to a specific user\n\n" +
+		"\033[1;33m/reply <message>\033[0m\n" +
+		"    Reply to the last private message you received\n\n" +
+		"\033[1;33m/exit\033[0m\n" +
+		"    Exit the chat server\n\n" +
+		"\033[1;33m/help\033[0m\n" +
+		"    Display this help message\n\n" +
+		"\033[1;36mRegular Messages:\033[0m\n" +
+		"    Type any message without a command to broadcast to all users\n"
+
+	conn.Write([]byte(helpMessage))
 }
