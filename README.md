@@ -6,9 +6,17 @@ A high-performance, real-time chat server built with Go (Golang) that enables se
 
 - Real-time message broadcasting
 - Private messaging between users
+- User registration and authentication
 - Reply to the last private message sender with `/reply <message>`
 - List all connected users with `/users` (displayed in grey)
-- Colored messages: blue for chat/private, yellow for join/leave notifications
+- Exit chat gracefully with `/exit`
+- Get help with all commands using `/help`
+- Colored messages:
+  - Blue for chat messages
+  - Yellow for join/leave notifications
+  - Red for error messages
+  - Green for success messages
+  - Cyan for welcome messages
 - TCP-based communication
 - Concurrent client handling
 - Simple and efficient architecture
@@ -58,6 +66,14 @@ telnet localhost 8080
 
 ### Commands
 
+- To register a new account:
+  ```
+  /register <username> <password>
+  ```
+- To login to your account:
+  ```
+  /login <username> <password>
+  ```
 - To send a private message:
   ```
   /private <username> <message>
@@ -66,12 +82,32 @@ telnet localhost 8080
   ```
   /reply <message>
   ```
-- To list all connected users (displayed in grey):
+- To list all connected users:
   ```
   /users
   ```
+- To exit the chat server:
+  ```
+  /exit
+  ```
+- To view all available commands:
+  ```
+  /help
+  ```
 - Regular messages are broadcast to all connected users (displayed in blue)
 - Join/leave notifications are displayed in yellow
+- Error messages are displayed in red
+- Success messages are displayed in green
+
+### Color Coding
+
+- \033[1;34m Blue: Regular chat messages
+- \033[1;33m Yellow: Join/leave notifications
+- \033[1;31m Red: Error messages
+- \033[1;32m Green: Success messages
+- \033[1;36m Cyan: Welcome messages and headers
+- \033[1;33m Yellow: Command names in help
+- \033[90m Grey: User list
 
 ### Additional Make Commands
 
