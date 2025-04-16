@@ -3,8 +3,10 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 
@@ -28,6 +30,13 @@ var (
 
 // main starts the chat server
 func main() {
+	// Load existing users from JSON file if it exists
+	if data, err := os.ReadFile("users.json"); err == nil {
+		if err := json.Unmarshal(data, &nameToPass); err != nil {
+			fmt.Println("Error loading users:", err)
+		}
+	}
+
 	// Start listening on port 8080
 	ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
@@ -57,13 +66,16 @@ func main() {
 // handleClient manages a single client connection
 func handleClient(conn net.Conn) {
 	reader := bufio.NewReader(conn)
+	var username string
+	var authenticated bool
 
 	// First, handle registration/login
-	conn.Write([]byte("Welcome! Please register or login:\n"))
-	conn.Write([]byte("1. To register: /register <username> <password>\n"))
-	conn.Write([]byte("2. To login: /login <username> <password>\n"))
+	conn.Write([]byte("\033[1;36mWelcome to the Chat Server!\033[0m\n"))
+	conn.Write([]byte("\033[1;32mPlease register or login:\033[0m\n"))
+	conn.Write([]byte("\033[1;33m1. To register: /register <username> <password>\033[0m\n"))
+	conn.Write([]byte("\033[1;33m2. To login: /login <username> <password>\033[0m\n"))
 
-	for {
+	for !authenticated {
 		message, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Println("Error reading message:", err)
@@ -72,18 +84,22 @@ func handleClient(conn net.Conn) {
 		message = strings.TrimSpace(message)
 
 		if strings.HasPrefix(message, "/register") {
-			handleRegisterCommand(conn, message)
-			break
+			username = handleRegisterCommand(conn, message)
+			if username != "" {
+				authenticated = true
+			}
 		} else if strings.HasPrefix(message, "/login") {
-			handleLoginCommand(conn, message)
-			break
+			username = handleLoginCommand(conn, message)
+			if username != "" {
+				authenticated = true
+			}
 		} else {
-			conn.Write([]byte("Please register or login first.\n"))
+			conn.Write([]byte("\033[1;31mPlease register or login first.\033[0m\n"))
 		}
 	}
 
 	// Get client's name after successful registration/login
-	conn.Write([]byte("Enter your display name: "))
+	conn.Write([]byte("\033[1;33mEnter your display name: \033[0m"))
 	name, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Println("Error reading name:", err)
@@ -127,35 +143,56 @@ func handleClient(conn net.Conn) {
 	conn.Close()
 }
 
-func checkRegistration(conn net.Conn) bool {
-	mutex.Lock()
-	defer mutex.Unlock()
-	_, exists := clients[conn]
-	return exists
-}
-
-func handleRegisterCommand(conn net.Conn, message string) {
-	parts := strings.SplitN(message, " ", 3) // Changed to 3 to properly split username and password
-	if len(parts) != 3 || strings.TrimSpace(parts[1]) == "" || strings.TrimSpace(parts[2]) == "" {
+// handleRegisterCommand handles user registration
+func handleRegisterCommand(conn net.Conn, message string) string {
+	parts := strings.SplitN(message, " ", 3)
+	if len(parts) != 3 {
 		conn.Write([]byte("Usage: /register <username> <password>\n"))
-		return
+		return ""
 	}
 	username := strings.TrimSpace(parts[1])
 	password := strings.TrimSpace(parts[2])
 
+	// Check if username already exists
+	mutex.Lock()
+	_, exists := nameToPass[username]
+	mutex.Unlock()
+	if exists {
+		conn.Write([]byte("\033[1;31mUsername already exists. Please choose another.\033[0m\n"))
+		return ""
+	}
+
 	// Hash the password using bcrypt
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		conn.Write([]byte("Error registering user. Please try again.\n"))
-		return
+		conn.Write([]byte("\033[1;31mError registering user. Please try again.\033[0m\n"))
+		return ""
 	}
 
 	mutex.Lock()
-	clients[conn] = username
-	nameToConn[username] = conn
 	nameToPass[username] = string(hashedPassword)
 	mutex.Unlock()
-	conn.Write([]byte(fmt.Sprintf("Welcome, %s! You can now start chatting.\n", username)))
+
+	// Save updated user data to JSON file
+	if err := saveUsersToFile(); err != nil {
+		fmt.Println("Error saving users:", err)
+		conn.Write([]byte("\033[1;31mError saving registration. Please try again.\033[0m\n"))
+		return ""
+	}
+
+	conn.Write([]byte(fmt.Sprintf("\033[1;32mWelcome, %s! You can now start chatting.\033[0m\n", username)))
+	return username
+}
+
+// saveUsersToFile saves the current user data to users.json
+func saveUsersToFile() error {
+	mutex.Lock()
+	data, err := json.Marshal(nameToPass)
+	mutex.Unlock()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile("users.json", data, 0644)
 }
 
 // handleCommand handles any commands from the client
@@ -191,12 +228,12 @@ func handleReplyCommand(conn net.Conn, message string) {
 	lastSender, ok := lastPrivateSender[username]
 	mutex.Unlock()
 	if !ok {
-		conn.Write([]byte("No private messages to reply to.\n"))
+		conn.Write([]byte("\033[1;31mNo private messages to reply to.\033[0m\n"))
 		return
 	}
 	parts := strings.SplitN(message, " ", 2)
 	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
-		conn.Write([]byte("Usage: /reply <message>\n"))
+		conn.Write([]byte("\033[1;31mUsage: /reply <message>\033[0m\n"))
 		return
 	}
 	msg := parts[1]
@@ -224,11 +261,11 @@ func handleBroadcasting() {
 }
 
 // handleLoginCommand handles user login
-func handleLoginCommand(conn net.Conn, message string) {
+func handleLoginCommand(conn net.Conn, message string) string {
 	parts := strings.SplitN(message, " ", 3)
 	if len(parts) != 3 {
 		conn.Write([]byte("Usage: /login <username> <password>\n"))
-		return
+		return ""
 	}
 	username := strings.TrimSpace(parts[1])
 	password := strings.TrimSpace(parts[2])
@@ -238,15 +275,16 @@ func handleLoginCommand(conn net.Conn, message string) {
 	mutex.Unlock()
 
 	if !exists {
-		conn.Write([]byte("User not found. Please register first.\n"))
-		return
+		conn.Write([]byte("\033[1;31mUser not found. Please register first.\033[0m\n"))
+		return ""
 	}
 
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	if err != nil {
-		conn.Write([]byte("Invalid password.\n"))
-		return
+		conn.Write([]byte("\033[1;31mInvalid password.\033[0m\n"))
+		return ""
 	}
 
-	conn.Write([]byte(fmt.Sprintf("Welcome back, %s!\n", username)))
+	conn.Write([]byte(fmt.Sprintf("\033[1;32mWelcome back, %s!\033[0m\n", username)))
+	return username
 }
