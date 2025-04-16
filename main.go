@@ -7,6 +7,8 @@ import (
 	"net"
 	"strings"
 	"sync"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Global variables for managing the chat server
@@ -15,6 +17,8 @@ var (
 	clients = make(map[net.Conn]string)
 	// nameToConn maps a username to its connection
 	nameToConn = make(map[string]net.Conn)
+	//nameToPass maps a username to its password
+	nameToPass = make(map[string]string)
 	// broadcast channel for sending messages to all clients
 	broadcast = make(chan string)
 	// mutex for synchronizing access to shared data
@@ -52,9 +56,34 @@ func main() {
 
 // handleClient manages a single client connection
 func handleClient(conn net.Conn) {
-	// Get client's name
-	conn.Write([]byte("Enter your name: "))
 	reader := bufio.NewReader(conn)
+
+	// First, handle registration/login
+	conn.Write([]byte("Welcome! Please register or login:\n"))
+	conn.Write([]byte("1. To register: /register <username> <password>\n"))
+	conn.Write([]byte("2. To login: /login <username> <password>\n"))
+
+	for {
+		message, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading message:", err)
+			return
+		}
+		message = strings.TrimSpace(message)
+
+		if strings.HasPrefix(message, "/register") {
+			handleRegisterCommand(conn, message)
+			break
+		} else if strings.HasPrefix(message, "/login") {
+			handleLoginCommand(conn, message)
+			break
+		} else {
+			conn.Write([]byte("Please register or login first.\n"))
+		}
+	}
+
+	// Get client's name after successful registration/login
+	conn.Write([]byte("Enter your display name: "))
 	name, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Println("Error reading name:", err)
@@ -98,8 +127,44 @@ func handleClient(conn net.Conn) {
 	conn.Close()
 }
 
+func checkRegistration(conn net.Conn) bool {
+	mutex.Lock()
+	defer mutex.Unlock()
+	_, exists := clients[conn]
+	return exists
+}
+
+func handleRegisterCommand(conn net.Conn, message string) {
+	parts := strings.SplitN(message, " ", 3) // Changed to 3 to properly split username and password
+	if len(parts) != 3 || strings.TrimSpace(parts[1]) == "" || strings.TrimSpace(parts[2]) == "" {
+		conn.Write([]byte("Usage: /register <username> <password>\n"))
+		return
+	}
+	username := strings.TrimSpace(parts[1])
+	password := strings.TrimSpace(parts[2])
+
+	// Hash the password using bcrypt
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		conn.Write([]byte("Error registering user. Please try again.\n"))
+		return
+	}
+
+	mutex.Lock()
+	clients[conn] = username
+	nameToConn[username] = conn
+	nameToPass[username] = string(hashedPassword)
+	mutex.Unlock()
+	conn.Write([]byte(fmt.Sprintf("Welcome, %s! You can now start chatting.\n", username)))
+}
+
 // handleCommand handles any commands from the client
 func handleCommand(conn net.Conn, message string) bool {
+	//register command
+	if strings.HasPrefix(message, "/register") {
+		handleRegisterCommand(conn, message)
+		return true
+	}
 	// /users command
 	if strings.HasPrefix(message, "/users") {
 		handleUsersCommand(conn)
@@ -156,4 +221,32 @@ func handleBroadcasting() {
 		}
 		mutex.Unlock()
 	}
+}
+
+// handleLoginCommand handles user login
+func handleLoginCommand(conn net.Conn, message string) {
+	parts := strings.SplitN(message, " ", 3)
+	if len(parts) != 3 {
+		conn.Write([]byte("Usage: /login <username> <password>\n"))
+		return
+	}
+	username := strings.TrimSpace(parts[1])
+	password := strings.TrimSpace(parts[2])
+
+	mutex.Lock()
+	hashedPassword, exists := nameToPass[username]
+	mutex.Unlock()
+
+	if !exists {
+		conn.Write([]byte("User not found. Please register first.\n"))
+		return
+	}
+
+	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	if err != nil {
+		conn.Write([]byte("Invalid password.\n"))
+		return
+	}
+
+	conn.Write([]byte(fmt.Sprintf("Welcome back, %s!\n", username)))
 }
