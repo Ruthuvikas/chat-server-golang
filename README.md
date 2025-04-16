@@ -8,15 +8,10 @@ A high-performance, real-time chat server built with Go (Golang) that enables se
 - Private messaging between users
 - User registration and authentication
 - Reply to the last private message sender with `/reply <message>`
-- List all connected users with `/users` (displayed in grey)
+- List all connected users with `/users`
 - Exit chat gracefully with `/exit`
 - Get help with all commands using `/help`
-- Colored messages:
-  - Blue for chat messages
-  - Yellow for join/leave notifications
-  - Red for error messages
-  - Green for success messages
-  - Cyan for welcome messages
+- Color-coded messages for better readability
 - TCP-based communication
 - Concurrent client handling
 - Simple and efficient architecture
@@ -94,20 +89,6 @@ telnet localhost 8080
   ```
   /help
   ```
-- Regular messages are broadcast to all connected users (displayed in blue)
-- Join/leave notifications are displayed in yellow
-- Error messages are displayed in red
-- Success messages are displayed in green
-
-### Color Coding
-
-- \033[1;34m Blue: Regular chat messages
-- \033[1;33m Yellow: Join/leave notifications
-- \033[1;31m Red: Error messages
-- \033[1;32m Green: Success messages
-- \033[1;36m Cyan: Welcome messages and headers
-- \033[1;33m Yellow: Command names in help
-- \033[90m Grey: User list
 
 ### Additional Make Commands
 
