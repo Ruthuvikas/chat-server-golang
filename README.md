@@ -18,6 +18,10 @@ A high-performance, real-time chat server built with Go (Golang) that enables se
 - Simple and efficient architecture
 - Easy to deploy and scale
 
+## Video Demo
+
+[![Chat Server Demo](https://img.youtube.com/vi/5UEvIQLwuIY/0.jpg)](https://www.youtube.com/watch?v=5UEvIQLwuIY)
+
 ## Prerequisites
 
 - Go 1.16 or higher

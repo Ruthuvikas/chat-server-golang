@@ -96,6 +96,9 @@ func handleClient(conn net.Conn) {
 			if username != "" {
 				authenticated = true
 			}
+		} else if strings.HasPrefix(message, "/exit") {
+			handleExitCommand(conn)
+			return
 		} else {
 			conn.Write([]byte("\033[1;31mPlease register or login first.\033[0m\n"))
 		}
