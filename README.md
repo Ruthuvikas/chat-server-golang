@@ -18,6 +18,39 @@ A high-performance, real-time chat server built with Go (Golang) that enables se
 - Simple and efficient architecture
 - Easy to deploy and scale
 
+## Testing
+
+The chat server includes comprehensive unit tests to ensure reliability and functionality. The test suite (`main_test.go`) covers:
+
+- User registration and authentication
+- Private messaging functionality
+- Status updates and management
+- User data persistence
+- Network connection handling
+
+### Test Coverage
+
+The test suite verifies:
+- User registration with proper password hashing
+- Login functionality with correct credentials
+- Private message routing and delivery
+- Status update and retrieval
+- User data saving and loading
+- Concurrent access handling
+- Network connection management
+
+### Running Tests
+
+To run the tests:
+```bash
+make test
+```
+
+Or directly:
+```bash
+go test -v
+```
+
 ## Video Demo
 
 [![Chat Server Demo](https://img.youtube.com/vi/5UEvIQLwuIY/0.jpg)](https://www.youtube.com/watch?v=5UEvIQLwuIY)
