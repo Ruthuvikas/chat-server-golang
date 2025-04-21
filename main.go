@@ -3,14 +3,11 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"sync"
-
-	"golang.org/x/crypto/bcrypt"
+	"time"
 )
 
 // Global variables for managing the chat server
@@ -19,26 +16,51 @@ var (
 	clients = make(map[net.Conn]string)
 	// nameToConn maps a username to its connection
 	nameToConn = make(map[string]net.Conn)
-	//nameToPass maps a username to its password
-	nameToPass = make(map[string]string)
+	// displayNames tracks all used display names
+	displayNames = make(map[string]bool)
 	// broadcast channel for sending messages to all clients
 	broadcast = make(chan string)
-
-	//status map for storing the status of the clients
-	status = make(map[string]string)
 	// mutex for synchronizing access to shared data
 	mutex             = &sync.Mutex{}
 	lastPrivateSender = make(map[string]string) // maps recipient username to last sender username
+
+	// Rate limiting for registration
+	registerAttempts = make(map[string]int)       // IP -> attempt count
+	registerTimes    = make(map[string]time.Time) // IP -> last attempt time
+	registerMutex    = &sync.Mutex{}
 )
+
+// isRateLimited checks if an IP is rate limited for registration
+func isRateLimited(ip string) bool {
+	registerMutex.Lock()
+	defer registerMutex.Unlock()
+
+	now := time.Now()
+	lastAttempt, exists := registerTimes[ip]
+
+	// Reset counter if more than 1 minute has passed
+	if exists && now.Sub(lastAttempt) > time.Minute {
+		registerAttempts[ip] = 0
+	}
+
+	// Allow max 3 attempts per minute
+	if registerAttempts[ip] >= 3 {
+		return true
+	}
+
+	registerAttempts[ip]++
+	registerTimes[ip] = now
+	return false
+}
 
 // main starts the chat server
 func main() {
-	// Load existing users from JSON file if it exists
-	if data, err := os.ReadFile("users.json"); err == nil {
-		if err := json.Unmarshal(data, &nameToPass); err != nil {
-			fmt.Println("Error loading users:", err)
-		}
+	// Initialize database
+	if err := initDB(); err != nil {
+		fmt.Println("Error initializing database:", err)
+		return
 	}
+	defer closeDB()
 
 	// Start listening on port 8080
 	ln, err := net.Listen("tcp", ":8080")
@@ -70,6 +92,7 @@ func main() {
 func handleClient(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	var username string
+	var name string
 	var authenticated bool
 
 	// First, handle registration/login
@@ -104,14 +127,28 @@ func handleClient(conn net.Conn) {
 		}
 	}
 
-	// Get client's name after successful registration/login
-	conn.Write([]byte("\033[1;33mEnter your display name: \033[0m"))
-	name, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Println("Error reading name:", err)
-		return
+	// Get client's display name after successful registration/login
+	for {
+		conn.Write([]byte("\033[1;33mEnter your display name: \033[0m"))
+		displayName, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading name:", err)
+			return
+		}
+		displayName = strings.TrimSpace(displayName)
+
+		// Check if display name is already taken
+		mutex.Lock()
+		if displayNames[displayName] {
+			mutex.Unlock()
+			conn.Write([]byte("\033[1;31mDisplay name already taken. Please choose another.\033[0m\n"))
+			continue
+		}
+		displayNames[displayName] = true
+		mutex.Unlock()
+		name = displayName
+		break
 	}
-	name = strings.TrimSpace(name)
 
 	// Add client to the server's client list
 	mutex.Lock()
@@ -144,6 +181,7 @@ func handleClient(conn net.Conn) {
 	mutex.Lock()
 	delete(clients, conn)
 	delete(nameToConn, name)
+	delete(displayNames, name)
 	mutex.Unlock()
 	broadcast <- fmt.Sprintf("\033[33m%s has left the chat\033[0m\n", name)
 	conn.Close()
@@ -151,6 +189,15 @@ func handleClient(conn net.Conn) {
 
 // handleRegisterCommand handles user registration
 func handleRegisterCommand(conn net.Conn, message string) string {
+	// Get client IP
+	ip := conn.RemoteAddr().String()
+
+	// Check rate limiting
+	if isRateLimited(ip) {
+		conn.Write([]byte("\033[1;31mToo many registration attempts. Please try again later.\033[0m\n"))
+		return ""
+	}
+
 	parts := strings.SplitN(message, " ", 3)
 	if len(parts) != 3 {
 		conn.Write([]byte("Usage: /register <username> <password>\n"))
@@ -159,30 +206,31 @@ func handleRegisterCommand(conn net.Conn, message string) string {
 	username := strings.TrimSpace(parts[1])
 	password := strings.TrimSpace(parts[2])
 
+	// Validate username and password length
+	if len(username) > 10 {
+		conn.Write([]byte("\033[1;31mUsername must be 10 characters or less.\033[0m\n"))
+		return ""
+	}
+	if len(password) > 10 {
+		conn.Write([]byte("\033[1;31mPassword must be 10 characters or less.\033[0m\n"))
+		return ""
+	}
+
 	// Check if username already exists
-	mutex.Lock()
-	_, exists := nameToPass[username]
-	mutex.Unlock()
-	if exists {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = ?", username).Scan(&count)
+	if err != nil {
+		conn.Write([]byte("\033[1;31mError checking username. Please try again.\033[0m\n"))
+		return ""
+	}
+	if count > 0 {
 		conn.Write([]byte("\033[1;31mUsername already exists. Please choose another.\033[0m\n"))
 		return ""
 	}
 
-	// Hash the password using bcrypt
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
+	// Save user to database
+	if err := saveUser(username, password); err != nil {
 		conn.Write([]byte("\033[1;31mError registering user. Please try again.\033[0m\n"))
-		return ""
-	}
-
-	mutex.Lock()
-	nameToPass[username] = string(hashedPassword)
-	mutex.Unlock()
-
-	// Save updated user data to JSON file
-	if err := saveUsersToFile(); err != nil {
-		fmt.Println("Error saving users:", err)
-		conn.Write([]byte("\033[1;31mError saving registration. Please try again.\033[0m\n"))
 		return ""
 	}
 
@@ -190,15 +238,122 @@ func handleRegisterCommand(conn net.Conn, message string) string {
 	return username
 }
 
-// saveUsersToFile saves the current user data to users.json
-func saveUsersToFile() error {
-	mutex.Lock()
-	data, err := json.Marshal(nameToPass)
-	mutex.Unlock()
-	if err != nil {
-		return err
+// handleLoginCommand handles user login
+func handleLoginCommand(conn net.Conn, message string) string {
+	parts := strings.SplitN(message, " ", 3)
+	if len(parts) != 3 {
+		conn.Write([]byte("Usage: /login <username> <password>\n"))
+		return ""
 	}
-	return os.WriteFile("users.json", data, 0644)
+	username := strings.TrimSpace(parts[1])
+	password := strings.TrimSpace(parts[2])
+
+	// Validate username and password length
+	if len(username) > 10 {
+		conn.Write([]byte("\033[1;31mUsername must be 10 characters or less.\033[0m\n"))
+		return ""
+	}
+	if len(password) > 10 {
+		conn.Write([]byte("\033[1;31mPassword must be 10 characters or less.\033[0m\n"))
+		return ""
+	}
+
+	if !verifyUser(username, password) {
+		conn.Write([]byte("\033[1;31mInvalid username or password.\033[0m\n"))
+		return ""
+	}
+
+	conn.Write([]byte(fmt.Sprintf("\033[1;32mWelcome back, %s!\033[0m\n", username)))
+	return username
+}
+
+// handleStatusCommand handles the /status command
+func handleStatusCommand(conn net.Conn, message string) {
+	parts := strings.SplitN(message, " ", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+		conn.Write([]byte("\033[1;31mUsage: /status <set status>\033[0m\n"))
+		return
+	}
+	newStatus := parts[1]
+	mutex.Lock()
+	username := clients[conn]
+	mutex.Unlock()
+
+	if err := updateUserStatus(username, newStatus); err != nil {
+		conn.Write([]byte("\033[1;31mError updating status. Please try again.\033[0m\n"))
+		return
+	}
+
+	conn.Write([]byte(fmt.Sprintf("\033[1;32mYour status has been set to: %s\033[0m\n", newStatus)))
+}
+
+// handleUsersCommand handles the /users command
+func handleUsersCommand(conn net.Conn) {
+	users, err := getAllUsers()
+	if err != nil {
+		conn.Write([]byte("\033[1;31mError retrieving users list.\033[0m\n"))
+		return
+	}
+
+	for username, status := range users {
+		if status != "" {
+			conn.Write([]byte(fmt.Sprintf("\033[90m%s (%s)\033[0m\n", username, status)))
+		} else {
+			conn.Write([]byte("\033[90m" + username + "\033[0m\n"))
+		}
+	}
+}
+
+// handleBroadcasting sends messages to all connected clients
+func handleBroadcasting() {
+	for message := range broadcast {
+		mutex.Lock()
+		for conn := range clients {
+			conn.Write([]byte(message))
+		}
+		mutex.Unlock()
+	}
+}
+
+// handleExitCommand handles the /exit command
+func handleExitCommand(conn net.Conn) {
+	mutex.Lock()
+	name := clients[conn]
+	delete(clients, conn)
+	delete(nameToConn, name)
+	mutex.Unlock()
+
+	// Notify everyone that the user has left
+	broadcast <- fmt.Sprintf("\033[33m%s has left the chat\033[0m\n", name)
+
+	// Send goodbye message to the exiting user
+	conn.Write([]byte("\033[1;32mGoodbye! Thanks for chatting.\033[0m\n"))
+
+	// Close the connection
+	conn.Close()
+}
+
+// handleHelpCommand displays all available commands and their descriptions
+func handleHelpCommand(conn net.Conn) {
+	helpMessage := "\033[1;36mAvailable Commands:\033[0m\n\n" +
+		"\033[1;33m/register <username> <password>\033[0m\n" +
+		"    Register a new user account\n\n" +
+		"\033[1;33m/login <username> <password>\033[0m\n" +
+		"    Login to your account\n\n" +
+		"\033[1;33m/users\033[0m\n" +
+		"    List all currently connected users\n\n" +
+		"\033[1;33m/private <username> <message>\033[0m\n" +
+		"    Send a private message to a specific user\n\n" +
+		"\033[1;33m/reply <message>\033[0m\n" +
+		"    Reply to the last private message you received\n\n" +
+		"\033[1;33m/exit\033[0m\n" +
+		"    Exit the chat server\n\n" +
+		"\033[1;33m/help\033[0m\n" +
+		"    Display this help message\n\n" +
+		"\033[1;36mRegular Messages:\033[0m\n" +
+		"    Type any message without a command to broadcast to all users\n"
+
+	conn.Write([]byte(helpMessage))
 }
 
 // handleCommand handles any commands from the client
@@ -241,21 +396,6 @@ func handleCommand(conn net.Conn, message string) bool {
 	return false
 }
 
-// handleStatusCommand handles the /status command
-func handleStatusCommand(conn net.Conn, message string) {
-	parts := strings.SplitN(message, " ", 2)
-	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
-		conn.Write([]byte("\033[1;31mUsage: /status <set status>\033[0m\n"))
-		return
-	}
-	newStatus := parts[1]
-	mutex.Lock()
-	username := clients[conn]
-	status[username] = newStatus
-	mutex.Unlock()
-	conn.Write([]byte(fmt.Sprintf("\033[1;32mYour status has been set to: %s\033[0m\n", newStatus)))
-}
-
 // handleReplyCommand allows replying to the last private sender
 func handleReplyCommand(conn net.Conn, message string) {
 	mutex.Lock()
@@ -273,100 +413,4 @@ func handleReplyCommand(conn net.Conn, message string) {
 	}
 	msg := parts[1]
 	handlePrivateMessage(conn, fmt.Sprintf("/private %s %s", lastSender, msg))
-}
-
-// handleUsersCommand handles the /users command
-func handleUsersCommand(conn net.Conn) {
-	mutex.Lock()
-	for _, name := range clients {
-		//display name and status
-		status, ok := status[name]
-		if ok {
-			conn.Write([]byte(fmt.Sprintf("\033[90m%s (%s)\033[0m\n", name, status)))
-		} else {
-			conn.Write([]byte("\033[90m" + name + "\033[0m\n"))
-		}
-	}
-	mutex.Unlock()
-}
-
-// handleBroadcasting sends messages to all connected clients
-func handleBroadcasting() {
-	for message := range broadcast {
-		mutex.Lock()
-		for conn, _ := range clients {
-			conn.Write([]byte(message))
-		}
-		mutex.Unlock()
-	}
-}
-
-// handleLoginCommand handles user login
-func handleLoginCommand(conn net.Conn, message string) string {
-	parts := strings.SplitN(message, " ", 3)
-	if len(parts) != 3 {
-		conn.Write([]byte("Usage: /login <username> <password>\n"))
-		return ""
-	}
-	username := strings.TrimSpace(parts[1])
-	password := strings.TrimSpace(parts[2])
-
-	mutex.Lock()
-	hashedPassword, exists := nameToPass[username]
-	mutex.Unlock()
-
-	if !exists {
-		conn.Write([]byte("\033[1;31mUser not found. Please register first.\033[0m\n"))
-		return ""
-	}
-
-	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
-	if err != nil {
-		conn.Write([]byte("\033[1;31mInvalid password.\033[0m\n"))
-		return ""
-	}
-
-	conn.Write([]byte(fmt.Sprintf("\033[1;32mWelcome back, %s!\033[0m\n", username)))
-	return username
-}
-
-// handleExitCommand handles the /exit command
-func handleExitCommand(conn net.Conn) {
-	mutex.Lock()
-	name := clients[conn]
-	delete(clients, conn)
-	delete(nameToConn, name)
-	mutex.Unlock()
-
-	// Notify everyone that the user has left
-	broadcast <- fmt.Sprintf("\033[33m%s has left the chat\033[0m\n", name)
-
-	// Send goodbye message to the exiting user
-	conn.Write([]byte("\033[1;32mGoodbye! Thanks for chatting.\033[0m\n"))
-
-	// Close the connection
-	conn.Close()
-}
-
-// handleHelpCommand displays all available commands and their descriptions
-func handleHelpCommand(conn net.Conn) {
-	helpMessage := "\033[1;36mAvailable Commands:\033[0m\n\n" +
-		"\033[1;33m/register <username> <password>\033[0m\n" +
-		"    Register a new user account\n\n" +
-		"\033[1;33m/login <username> <password>\033[0m\n" +
-		"    Login to your account\n\n" +
-		"\033[1;33m/users\033[0m\n" +
-		"    List all currently connected users\n\n" +
-		"\033[1;33m/private <username> <message>\033[0m\n" +
-		"    Send a private message to a specific user\n\n" +
-		"\033[1;33m/reply <message>\033[0m\n" +
-		"    Reply to the last private message you received\n\n" +
-		"\033[1;33m/exit\033[0m\n" +
-		"    Exit the chat server\n\n" +
-		"\033[1;33m/help\033[0m\n" +
-		"    Display this help message\n\n" +
-		"\033[1;36mRegular Messages:\033[0m\n" +
-		"    Type any message without a command to broadcast to all users\n"
-
-	conn.Write([]byte(helpMessage))
 }

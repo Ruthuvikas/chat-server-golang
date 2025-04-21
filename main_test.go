@@ -2,14 +2,10 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"net"
-	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 // Test helper function to create a mock connection
@@ -34,6 +30,12 @@ func TestHandleRegisterCommand(t *testing.T) {
 	conn, _ := createMockConn()
 	message := "/register testuser testpass"
 
+	// Initialize database
+	if err := initDB(); err != nil {
+		t.Fatalf("Error initializing database: %v", err)
+	}
+	defer closeDB()
+
 	// Test
 	username := handleRegisterCommand(conn, message)
 
@@ -42,26 +44,24 @@ func TestHandleRegisterCommand(t *testing.T) {
 		t.Errorf("Expected username 'testuser', got '%s'", username)
 	}
 
-	// Check if password was hashed and stored
-	mutex.Lock()
-	hashedPass, exists := nameToPass["testuser"]
-	mutex.Unlock()
-	if !exists {
-		t.Error("User was not stored in nameToPass")
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte("testpass")); err != nil {
-		t.Error("Password was not properly hashed")
+	// Verify user was saved to database
+	if !verifyUser("testuser", "testpass") {
+		t.Error("User was not properly saved to database")
 	}
 
 	// Cleanup
-	mutex.Lock()
-	delete(nameToPass, "testuser")
-	mutex.Unlock()
+	db.Exec("DELETE FROM users WHERE username = ?", "testuser")
 }
 
 func TestHandleLoginCommand(t *testing.T) {
 	// Setup
 	conn, _ := createMockConn()
+	// Initialize database
+	if err := initDB(); err != nil {
+		t.Fatalf("Error initializing database: %v", err)
+	}
+	defer closeDB()
+
 	// First register a user
 	handleRegisterCommand(conn, "/register testuser testpass")
 
@@ -74,9 +74,7 @@ func TestHandleLoginCommand(t *testing.T) {
 	}
 
 	// Cleanup
-	mutex.Lock()
-	delete(nameToPass, "testuser")
-	mutex.Unlock()
+	db.Exec("DELETE FROM users WHERE username = ?", "testuser")
 }
 
 func TestHandlePrivateMessage(t *testing.T) {
@@ -130,8 +128,13 @@ func TestHandlePrivateMessage(t *testing.T) {
 func TestHandleStatusCommand(t *testing.T) {
 	// Setup
 	conn, _ := createMockConn()
+	if err := initDB(); err != nil {
+		t.Fatalf("Error initializing database: %v", err)
+	}
+	defer closeDB()
 
-	// Set up the client mapping
+	// Register and login a user
+	handleRegisterCommand(conn, "/register testuser testpass")
 	mutex.Lock()
 	clients[conn] = "testuser"
 	nameToConn["testuser"] = conn
@@ -140,63 +143,24 @@ func TestHandleStatusCommand(t *testing.T) {
 	// Test
 	handleStatusCommand(conn, "/status busy")
 
-	// Give some time for the status to be processed
-	time.Sleep(100 * time.Millisecond)
-
 	// Verify
-	mutex.Lock()
-	userStatus, exists := status["testuser"]
-	mutex.Unlock()
-	if !exists {
-		t.Error("Status was not set")
+	status, err := getUserStatus("testuser")
+	if err != nil {
+		t.Error("Error getting user status:", err)
 	}
-	if userStatus != "busy" {
-		t.Errorf("Expected status 'busy', got '%s'", userStatus)
+	if status != "busy" {
+		t.Errorf("Expected status 'busy', got '%s'", status)
 	}
 
 	// Cleanup
 	mutex.Lock()
 	delete(clients, conn)
 	delete(nameToConn, "testuser")
-	delete(status, "testuser")
 	mutex.Unlock()
+	db.Exec("DELETE FROM users WHERE username = ?", "testuser")
 }
 
 func TestSaveUsersToFile(t *testing.T) {
-	// Setup
-	testUsers := map[string]string{
-		"testuser1": "hashedpass1",
-		"testuser2": "hashedpass2",
-	}
-	mutex.Lock()
-	nameToPass = testUsers
-	mutex.Unlock()
-
-	// Test
-	err := saveUsersToFile()
-	if err != nil {
-		t.Errorf("Error saving users to file: %v", err)
-	}
-
-	// Verify
-	data, err := os.ReadFile("users.json")
-	if err != nil {
-		t.Errorf("Error reading users file: %v", err)
-	}
-
-	var loadedUsers map[string]string
-	err = json.Unmarshal(data, &loadedUsers)
-	if err != nil {
-		t.Errorf("Error unmarshaling users: %v", err)
-	}
-
-	if len(loadedUsers) != len(testUsers) {
-		t.Errorf("Expected %d users, got %d", len(testUsers), len(loadedUsers))
-	}
-
-	// Cleanup
-	os.Remove("users.json")
-	mutex.Lock()
-	nameToPass = make(map[string]string)
-	mutex.Unlock()
+	// This test is no longer needed as we're using database storage now
+	t.Skip("Skipping test as we're using database storage now")
 }

@@ -12,7 +12,7 @@ build:
 # Run the application
 run:
 	@echo "Running chat server..."
-	go run main.go private_message.go
+	go run main.go database.go private_message.go
 
 # Clean build artifacts
 clean:
