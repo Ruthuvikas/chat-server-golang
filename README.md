@@ -17,6 +17,19 @@ A high-performance, real-time chat server built with Go (Golang) that enables se
 - Concurrent client handling
 - Simple and efficient architecture
 - Easy to deploy and scale
+- SQLite database for persistent user storage
+- Rate limiting for registration (3 attempts per minute)
+- Unique display names enforcement
+- Username and password length restrictions (max 10 characters)
+
+## Security Features
+
+- Password hashing using bcrypt
+- Rate limiting for registration attempts
+- SQL injection prevention
+- Thread-safe operations
+- Unique display name enforcement
+- Input validation and sanitization
 
 ## Testing
 
@@ -27,6 +40,9 @@ The chat server includes comprehensive unit tests to ensure reliability and func
 - Status updates and management
 - User data persistence
 - Network connection handling
+- Rate limiting functionality
+- Display name uniqueness
+- Input validation
 
 ### Test Coverage
 
@@ -38,6 +54,9 @@ The test suite verifies:
 - User data saving and loading
 - Concurrent access handling
 - Network connection management
+- Rate limiting enforcement
+- Display name uniqueness
+- Input validation
 
 ### Running Tests
 
@@ -60,6 +79,7 @@ go test -v
 - Go 1.16 or higher
 - Basic understanding of TCP protocol
 - Make (for using Makefile commands)
+- SQLite3 (for database operations)
 
 ## Installation
 
@@ -86,7 +106,7 @@ make run
 
 Alternatively, you can run the server directly:
 ```bash
-go run main.go private_message.go
+go run main.go database.go private_message.go
 ```
 
 ## Usage
@@ -103,30 +123,46 @@ telnet localhost 8080
   ```
   /register <username> <password>
   ```
+  - Username and password must be 10 characters or less
+  - Maximum 3 registration attempts per minute per IP
+
 - To login to your account:
   ```
   /login <username> <password>
   ```
+
+- To set your display name:
+  ```
+  (Prompted after login/registration)
+  ```
+  - Display names must be unique
+  - Case-sensitive
+
 - To send a private message:
   ```
   /private <username> <message>
   ```
+
 - To reply to the last private message sender:
   ```
   /reply <message>
   ```
+
 - To list all connected users:
   ```
   /users
   ```
+
 - To set your status:
   ```
   /status <your status message>
   ```
+
 - To exit the chat server:
   ```
   /exit
   ```
+
 - To view all available commands:
   ```
   /help
